@@ -7,6 +7,7 @@ import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
 import { IntegrationTimeDto } from '@gitroom/nestjs-libraries/dtos/integrations/integration.time.dto';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { PlugDto } from '@gitroom/nestjs-libraries/dtos/plugs/plug.dto';
+import { WIPED_CREDENTIALS } from '@gitroom/nestjs-libraries/integrations/public.page.selection';
 
 @Injectable()
 export class IntegrationRepository {
@@ -212,6 +213,7 @@ export class IntegrationRepository {
         data: {
           internalId: `deleted_${params.internalId}_${makeId(10)}`,
           deletedAt: new Date(),
+          ...WIPED_CREDENTIALS,
         },
       });
     }
@@ -415,6 +417,8 @@ export class IntegrationRepository {
             not: upsert.id,
           },
           rootInternalId: rootId,
+          // a deleted channel must not get credentials back
+          deletedAt: null,
         },
         data: {
           token,
@@ -821,6 +825,7 @@ export class IntegrationRepository {
       },
       data: {
         deletedAt: new Date(),
+        ...WIPED_CREDENTIALS,
       },
     });
   }
