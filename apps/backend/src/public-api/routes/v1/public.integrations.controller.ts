@@ -59,6 +59,12 @@ import { GetOrgActivityDto } from '@gitroom/nestjs-libraries/dtos/analytics/get.
 import { ResetCreditsDto } from '@gitroom/nestjs-libraries/dtos/billing/reset.credits.dto';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import dayjs from 'dayjs';
+import {
+  PAGE_SELECTION,
+  isAllowedRedirect,
+  otherConnectedIds,
+  toPublicPages,
+} from '@gitroom/nestjs-libraries/integrations/public.page.selection';
 
 @ApiTags('Public API')
 @Controller('/public/v1')
@@ -332,6 +338,8 @@ export class PublicIntegrationsController {
         picture: integration.picture,
         disabled: integration.disabled,
         profile: integration.profile,
+        // a two-step channel still waiting for its page (public page choice)
+        inBetweenSteps: integration.inBetweenSteps,
         customer: integration.customer
           ? {
               id: integration.customer.id,
@@ -346,9 +354,17 @@ export class PublicIntegrationsController {
   async getIntegrationUrl(
     @Param('integration') integration: string,
     @Query('refresh') refresh: string,
-    @GetOrgFromRequest() org: Organization
+    @GetOrgFromRequest() org: Organization,
+    @Query('redirectUrl') redirectUrl?: string
   ) {
     Sentry.metrics.count('public_api-request', 1);
+    if (
+      redirectUrl &&
+      !isAllowedRedirect(redirectUrl, process.env.PUBLIC_API_REDIRECT_ORIGINS)
+    ) {
+      throw new HttpException({ msg: 'Redirect URL not allowed' }, 400);
+    }
+
     if (
       !this._integrationManager
         .getAllowedSocialsIntegrations()
@@ -385,12 +401,140 @@ export class PublicIntegrationsController {
         await ioRedis.set(`refresh:${state}`, refresh, 'EX', 3600);
       }
 
+      // the channel page sends the user back there once the platform
+      // authorized the connection (see continue.integration.tsx)
+      if (redirectUrl) {
+        await ioRedis.set(`redirect:${state}`, redirectUrl, 'EX', 3600);
+      }
+
       await ioRedis.set(`organization:${state}`, org.id, 'EX', 3600);
       await ioRedis.set(`login:${state}`, codeVerifier, 'EX', 3600);
 
       return { url };
     } catch (err) {
       throw new HttpException({ msg: 'Failed to generate auth URL' }, 500);
+    }
+  }
+
+  // A two-step channel (Facebook page, Instagram via a page, LinkedIn page)
+  // waiting for its page: the list the user can choose from, without tokens
+  @Get('/integrations/:id/pages')
+  async listChannelPages(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    const { integration, items } = await this.loadChannelPages(org.id, id);
+    const others = otherConnectedIds(
+      await this._integrationService.getIntegrationsList(org.id),
+      integration.id
+    );
+    return { pages: toPublicPages(items, others) };
+  }
+
+  // Saves the chosen page. Only a page id is accepted: the provider payload
+  // is rebuilt from the fresh list, and a page another channel already
+  // publishes to is refused (saving it would delete that channel).
+  @Post('/integrations/:id/page')
+  async chooseChannelPage(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @Body('page') page: string
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    if (typeof page !== 'string' || !page.trim()) {
+      throw new HttpException({ msg: 'A page id is required' }, 400);
+    }
+
+    const { integration, rule, items } = await this.loadChannelPages(
+      org.id,
+      id
+    );
+    const item = (Array.isArray(items) ? items : []).find(
+      (p: any) => p && String(p.id) === page
+    );
+    if (!item) {
+      throw new HttpException({ msg: 'Page not found' }, 404);
+    }
+
+    const others = otherConnectedIds(
+      await this._integrationService.getIntegrationsList(org.id),
+      integration.id
+    );
+    if (others.has(String(item.id))) {
+      throw new HttpException(
+        { msg: 'This page is already connected to another channel' },
+        409
+      );
+    }
+
+    await this._integrationService.saveProviderPage(
+      org.id,
+      id,
+      rule.toSave(item)
+    );
+
+    const saved = await this._integrationService.getIntegrationById(
+      org.id,
+      id
+    );
+    return {
+      id: saved!.id,
+      name: saved!.customName || saved!.name,
+      identifier: saved!.providerIdentifier,
+      picture: saved!.picture,
+      profile: saved!.profile,
+      inBetweenSteps: saved!.inBetweenSteps,
+    };
+  }
+
+  private async loadChannelPages(orgId: string, id: string) {
+    const integration = await this._integrationService.getIntegrationById(
+      orgId,
+      id
+    );
+    if (!integration || integration.deletedAt) {
+      throw new HttpException({ msg: 'Integration not found' }, 404);
+    }
+    if (!integration.inBetweenSteps) {
+      throw new HttpException(
+        { msg: 'This channel does not wait for a page choice' },
+        409
+      );
+    }
+
+    const rule = PAGE_SELECTION[integration.providerIdentifier];
+    const provider = this._integrationManager.getSocialIntegration(
+      integration.providerIdentifier
+    ) as any;
+    if (!rule || typeof provider?.[rule.list] !== 'function') {
+      throw new HttpException(
+        { msg: 'Page choice is not supported for this provider' },
+        400
+      );
+    }
+
+    let bearer = integration.token;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const items = await provider[rule.list](bearer);
+        return { integration, rule, items };
+      } catch (err) {
+        if (err instanceof RefreshToken && attempt === 0) {
+          const data = await this._refreshIntegrationService.refresh(
+            integration
+          );
+          if (data && data.accessToken) {
+            bearer = data.accessToken;
+            continue;
+          }
+          throw new HttpException(
+            { msg: 'Channel disconnected due to expired token' },
+            401
+          );
+        }
+        throw new HttpException({ msg: 'Could not load the pages' }, 502);
+      }
     }
   }
 
