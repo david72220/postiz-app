@@ -9,7 +9,7 @@ Le code modifié est public ici, conformément à l'article 13 de l'AGPL.
 | Commit | Changement |
 |---|---|
 | public API — page choice | `GET /public/v1/integrations/:id/pages` (liste des Pages d'un canal en attente, **sans jetons**, `alreadyConnected`), `POST /public/v1/integrations/:id/page` `{page}` (refus 409 si la Page est déjà reliée à un autre canal vivant), `redirectUrl` accepté sur `GET /public/v1/social/:id` si son origine est listée dans `PUBLIC_API_REDIRECT_ORIGINS`, `inBetweenSteps` dans `GET /public/v1/integrations` |
-| state route guard | `POST /integrations/public/provider/:id/connect` refuse aussi une Page déjà reliée (une seule organisation pour tous les clients : la rechoisir supprimait l'autre canal) |
+| page guard | `updateIntegration` (seul écrivain d'une Page choisie, toutes routes) refuse 409 une Page déjà reliée à un autre canal vivant : une seule organisation pour tous les clients, la rechoisir donnait à l'autre canal le jeton du nouveau venu et supprimait le nouveau canal. La réponse de `social-connect` ne renvoie plus les jetons des Pages |
 | frontend | page de retour : si l'application d'origine a demandé un retour (`returnURL`) et que le canal attend sa Page, redirection immédiate au lieu de l'écran de choix Postiz |
 | credentials | un canal supprimé ne garde ni `token`, ni `refreshToken`, ni `customInstanceDetails` (`deleteChannel`, remplacement d'un canal, recopie `oneTimeToken` LinkedIn) |
 | ci | `.github/workflows/pilotai-image.yml` : tag `pilotai-v<upstream>.<n>` → `ghcr.io/david72220/postiz-app:<upstream>-pilotai.<n>` (amd64) |
@@ -25,7 +25,7 @@ Fournisseurs pris en charge par le choix public : `facebook`, `instagram` (via u
 ## Tests
 
 ```bash
-npx vitest run --root libraries/nestjs-libraries/src/integrations public.page.selection
+npx vitest run -c vitest.pilotai.config.mts
 npx tsc --noEmit -p apps/backend/tsconfig.json   # erreurs upstream préexistantes, aucune dans les fichiers du fork
 ```
 
@@ -37,7 +37,7 @@ Fusion du nouveau tag (jamais de rebase : l'historique publié n'est pas réécr
 git fetch upstream --tags
 git switch pilotai && git merge --no-ff <nouveau-tag>
 # relire le diff des fournisseurs Meta / LinkedIn (un nouveau scope casse toutes les connexions)
-npx vitest run --root libraries/nestjs-libraries/src/integrations public.page.selection
+npx vitest run -c vitest.pilotai.config.mts
 git push origin pilotai
 git tag pilotai-v<nouvelle-version>.1 && git push origin pilotai-v<nouvelle-version>.1
 ```

@@ -1,5 +1,5 @@
 import { PrismaRepository } from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import dayjs from 'dayjs';
 import { Integration, Prisma } from '@prisma/client';
@@ -181,6 +181,18 @@ export class IntegrationRepository {
         },
       },
     });
+
+    // Fork pilotai: every customer shares one organization, so a page another
+    // LIVE channel already publishes to is never taken over (below, that
+    // channel would get this login's token and this channel would be
+    // deleted). Checked here, the only writer of a chosen page, whatever the
+    // route or the provider payload.
+    if (existing && !existing.deletedAt && existing.id !== id) {
+      throw new HttpException(
+        'This page is already connected to another channel',
+        409
+      );
+    }
 
     // The page was picked through a fresh login: the row that keeps living
     // must also take that login's identity and refresh token, otherwise the

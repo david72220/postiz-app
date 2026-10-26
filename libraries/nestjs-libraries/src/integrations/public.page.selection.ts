@@ -8,7 +8,7 @@ export interface PublicPage {
   username: string | null;
   picture: string | null;
   // another live channel of the organization already publishes to this page:
-  // choosing it again would replace (and delete) that channel
+  // choosing it is refused (it would hand that channel to this login)
   alreadyConnected: boolean;
 }
 

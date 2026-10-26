@@ -434,7 +434,7 @@ export class PublicIntegrationsController {
 
   // Saves the chosen page. Only a page id is accepted: the provider payload
   // is rebuilt from the fresh list, and a page another channel already
-  // publishes to is refused (saving it would delete that channel).
+  // publishes to is refused (updateIntegration enforces it for every route).
   @Post('/integrations/:id/page')
   async chooseChannelPage(
     @GetOrgFromRequest() org: Organization,
