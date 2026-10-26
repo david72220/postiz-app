@@ -193,6 +193,18 @@ export const ContinueIntegration: FC<{
         }
       }
 
+      // The app that started the connection asked to get the user back
+      // (allowed origins only, see public.page.selection.ts): the page is
+      // chosen there, through the public API
+      if (inBetweenSteps && !searchParams.refresh && returnURL) {
+        navigateOrShow(
+          `/launches?pending=${provider}`,
+          returnURL,
+          'Channel Added'
+        );
+        return;
+      }
+
       // If it's a two-step provider, show the selection UI inline
       if (inBetweenSteps && !searchParams.refresh) {
         setTwoStepState({
