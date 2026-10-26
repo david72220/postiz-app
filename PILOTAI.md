@@ -31,10 +31,16 @@ npx tsc --noEmit -p apps/backend/tsconfig.json   # erreurs upstream préexistant
 
 ## Suivre une nouvelle version upstream
 
+Fusion du nouveau tag (jamais de rebase : l'historique publié n'est pas réécrit, pas de force-push).
+
 ```bash
 git fetch upstream --tags
-git rebase --onto <nouveau-tag> <ancien-tag> pilotai
+git switch pilotai && git merge --no-ff <nouveau-tag>
 # relire le diff des fournisseurs Meta / LinkedIn (un nouveau scope casse toutes les connexions)
-git push --force-with-lease origin pilotai
+npx vitest run --root libraries/nestjs-libraries/src/integrations public.page.selection
+git push origin pilotai
 git tag pilotai-v<nouvelle-version>.1 && git push origin pilotai-v<nouvelle-version>.1
 ```
+
+`git diff <tag-upstream> pilotai` montre à tout moment l'écart exact du fork.
+`.github/workflows/build-containers.yml` (upstream) est retiré du fork : il publierait vers `ghcr.io/gitroomhq` à chaque tag.
