@@ -24,6 +24,7 @@ import {
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { otherConnectedIds } from '@gitroom/nestjs-libraries/integrations/public.page.selection';
 
 @ApiTags('Integrations')
 @Controller('/integrations')
@@ -361,6 +362,22 @@ export class NoAuthIntegrationsController {
     }
 
     const org = await this._organizationService.getOrgById(organization);
+
+    // Every client shares one organization: picking a page another live
+    // channel already publishes to would replace (and delete) that channel
+    const chosen = String(body.page ?? body.id ?? '');
+    if (
+      chosen &&
+      otherConnectedIds(
+        await this._integrationService.getIntegrationsList(org.id),
+        id
+      ).has(chosen)
+    ) {
+      throw new HttpException(
+        'This page is already connected to another channel',
+        409
+      );
+    }
 
     return this._integrationService.saveProviderPage(org.id, id, body);
   }
